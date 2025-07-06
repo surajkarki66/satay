@@ -12,58 +12,52 @@ input_model_path = sys.argv[1]
 output_model_path = sys.argv[2]
 input_shape = int(sys.argv[3])
 
-# edit the onnx graph to remove the post-processing
-graph = onnx.load(input_model_path)
+# Load and import ONNX model
+onnx_model = onnx.load(input_model_path)
+graph = gs.import_onnx(onnx_model)
 
-# load with graph surgeon
-graph = gs.import_onnx(graph)
+# Names of reshape (post-processing) nodes to remove
+reshapes_to_remove = {
+    "/model.22/Reshape",
+    "/model.22/Reshape_1",
+    "/model.22/Reshape_2"
+}
 
-# get the extra operations to remove
-max_idx = 0
-for idx, node in enumerate(graph.nodes):
-    if node.name == "/model.22/Reshape":
-        reshape_l_idx = idx
-    if node.name == "/model.22/Reshape_1":
-        reshape_m_idx = idx
-    if node.name == "/model.22/Reshape_2":
-        reshape_r_idx = idx
+# Remove reshape nodes by filtering
+graph.nodes = [node for node in graph.nodes if node.name not in reshapes_to_remove]
 
-# remove extra operations
-del graph.nodes[reshape_r_idx:-1]
-del graph.nodes[reshape_m_idx:]
-del graph.nodes[reshape_l_idx:]
+# Get Concat nodes
+concat_names = [
+    "/model.22/Concat",
+    "/model.22/Concat_1",
+    "/model.22/Concat_2"
+]
 
-# get output layers
-concat_l = next(filter(lambda x: x.name == "/model.22/Concat", graph.nodes))
-concat_m = next(filter(lambda x: x.name == "/model.22/Concat_1", graph.nodes))
-concat_r = next(filter(lambda x: x.name == "/model.22/Concat_2", graph.nodes))
+concat_nodes = {}
+for name in concat_names:
+    node = next((n for n in graph.nodes if n.name == name), None)
+    if node is None:
+        raise ValueError(f"Concat node {name} not found in graph.")
+    concat_nodes[name] = node
 
-# get the resize layers
-resize = next(filter(lambda x: x.name == "/model.10/Resize", graph.nodes))
-resize.inputs[1] = gs.Constant("roi_0", np.array([0.0,0.0,0.0,0.0]))
-resize = next(filter(lambda x: x.name == "/model.13/Resize", graph.nodes))
-resize.inputs[1] = gs.Constant("roi_1", np.array([0.0,0.0,0.0,0.0]))
+# Update Resize nodes' ROI inputs
+for resize_name, roi_name in [("/model.10/Resize", "roi_0"), ("/model.13/Resize", "roi_1")]:
+    resize_node = next((n for n in graph.nodes if n.name == resize_name), None)
+    if resize_node is None:
+        raise ValueError(f"Resize node {resize_name} not found.")
+    if len(resize_node.inputs) > 1:
+        resize_node.inputs[1] = gs.Constant(roi_name, np.zeros(4, dtype=np.float16))
 
-# create the output nodes
-# output_l = gs.Variable("/model.22/Concat_output_0",   shape=[1, 144, input_shape//8, input_shape//8], dtype="float16")
-# output_m = gs.Variable("/model.22/Concat_1_output_0", shape=[1, 144, input_shape//16, input_shape//16], dtype="float16")
-# output_r = gs.Variable("/model.22/Concat_2_output_0", shape=[1, 144, input_shape//32, input_shape//32], dtype="float16")
-output_l = gs.Variable("/model.22/Concat_output_0",   shape=concat_l.outputs[0].shape, dtype="float16")
-output_m = gs.Variable("/model.22/Concat_1_output_0", shape=concat_m.outputs[0].shape, dtype="float16")
-output_r = gs.Variable("/model.22/Concat_2_output_0", shape=concat_r.outputs[0].shape, dtype="float16")
+# Create new graph outputs based on concat outputs
+graph.outputs = []
+for name, node in concat_nodes.items():
+    output_name = f"{name}_output_0"
+    output_var = gs.Variable(output_name, shape=node.outputs[0].shape, dtype=np.float16)
+    node.outputs = [output_var]
+    graph.outputs.append(output_var)
 
-# connect the output nodes
-concat_l.outputs = [ output_l ]
-concat_m.outputs = [ output_m ]
-concat_r.outputs = [ output_r ]
-
-# update the graph outputs
-graph.outputs = [ concat_l.outputs[0], concat_m.outputs[0], concat_r.outputs[0] ]
-
-# cleanup graph
+# Clean up graph and export
 graph.cleanup()
-
-# save the reduced network
-graph = gs.export_onnx(graph)
-graph.ir_version = 8 # need to downgrade the ir version
-onnx.save(graph, output_model_path)
+onnx_graph = gs.export_onnx(graph)
+onnx_graph.ir_version = 8  # Downgrade IR version for compatibility
+onnx.save(onnx_graph, output_model_path)

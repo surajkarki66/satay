@@ -43,11 +43,11 @@ OUTPUT_PATH=${ID}
 mkdir -p $OUTPUT_PATH
 
 ## perform preprocessing
-python ${FAMILY}-preprocess.py $MODEL_PATH $FPGACONVNET_MODEL_PATH $SIZE
+python3 ${FAMILY}-preprocess.py $MODEL_PATH $FPGACONVNET_MODEL_PATH $SIZE
 
 ## optimise the model
-python optimise.py $FPGACONVNET_MODEL_PATH $PLATFORM_PATH $OUTPUT_PATH
+python3 optimise.py $FPGACONVNET_MODEL_PATH $PLATFORM_PATH $OUTPUT_PATH
 
 ## post process the config to make it suitable for hardware generation
-python ${FAMILY}-postprocess.py $OUTPUT_PATH/config.json $OUTPUT_PATH
+python3 ${FAMILY}-postprocess.py $OUTPUT_PATH/config.json $OUTPUT_PATH
 
