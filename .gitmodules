@@ -4,3 +4,6 @@
 [submodule "fpgaconvnet-model"]
 	path = fpgaconvnet-model
 	url = https://github.com/AlexMontgomerie/fpgaconvnet-model.git
+[submodule "fpgaconvnet-hls"]
+	path = fpgaconvnet-hls
+	url = https://github.com/surajkarki66/fpgaconvnet-hls
